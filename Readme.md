@@ -1,4 +1,16 @@
-# Stenokey
+# Stenokey - pico
+This is a mod of Mike ady's Stenokey I have only 
+tried to improve on their work and make it more accessible/affordable.
+
+This fork implements a Pico and removes all components on the PCB except the switches. 
+Configuration is done in software. 
+
+The firmware was uploaded with Arduino using the pico board found in the board manager.
+the default driver is TX Bolt and can be set in Plover's Configuration. The baud rate is 115200.
+All drivers should work except NKRO keyboard since it's implemented as a teensy 
+builtin protocol at this time.
+
+---
 
 Stenographic keyboard
 
