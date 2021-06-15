@@ -1,0 +1,3 @@
+(fp_lib_table
+  (lib (name Stenokey)(type KiCad)(uri ${KIPRJMOD}/Stenokey.pretty)(options "")(descr ""))
+)

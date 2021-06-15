@@ -1,0 +1,3 @@
+(sym_lib_table
+  (lib (name Stenokey-rescue)(type Legacy)(uri ${KIPRJMOD}/Stenokey-rescue.lib)(options "")(descr ""))
+)

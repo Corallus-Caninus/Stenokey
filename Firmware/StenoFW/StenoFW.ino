@@ -60,10 +60,12 @@
 
 // Configuration variables
 
-int rowPins[ROWS+1] = {17, 18, 19, 20, 21};
+int rowPins[ROWS+1] = {10, 11, 12, 13, 14};
 int colPins[COLS] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
 int ledPin = 10;
-unsigned long debounceMillis = 20;
+//unsigned long debounceMillis = 20; // TODO: 5
+// is this a long time? usb poll interval is like 10..
+unsigned long debounceMillis = 25; 
 
 // Keyboard state variables
 
@@ -86,20 +88,25 @@ byte BrightnessLevels[8]=			// uniform CIE "lightness" levels
 
 void Options();
 void sendChord();
-
+void clearBooleanMatrices();
+void    checkAlreadyDebouncingKeys();
+void    checkNewDebouncingKeys();
+boolean recordCurrentKeys();
 
 // This is called when the keyboard is connected
 
 void setup()
 {
-  Keyboard.begin();
-  Serial.begin(9600);
+// TODO: test changed pinModes
+//  Keyboard.begin();
+  Serial.begin(115200);
   for (int i = 0; i < COLS; i++)
-    pinMode(colPins[i], INPUT_PULLUP);
+    pinMode(colPins[i], OUTPUT);
   for (int i = 0; i < ROWS+1; i++)
   {
-    pinMode(rowPins[i], OUTPUT);
-    digitalWrite(rowPins[i], HIGH);
+    Serial.println(rowPins[i]);
+    pinMode(rowPins[i], INPUT);
+    digitalWrite(colPins[i], LOW);
   }
   pinMode(ledPin, OUTPUT);
   clearBooleanMatrices();
@@ -111,7 +118,7 @@ void loop()
 {
   // Handle options switches first
   
-  Options();
+  //Options();
 
   readKeys();
   
@@ -122,6 +129,7 @@ void loop()
   if (!isStrokeInProgress)
   {
     checkAlreadyDebouncingKeys();
+    // TODO: bad logic due to globals
     if (!isStrokeInProgress)
 		checkNewDebouncingKeys();
   }
@@ -145,16 +153,40 @@ void loop()
 
 // Read all keys
 
+// Josh: "Dvorak is a superior keyboard layout."
 void readKeys()
 {
-  for (int i = 0; i < ROWS; i++)
-  {
-    digitalWrite(rowPins[i], LOW);
-    for (int j = 0; j < COLS; j++)
-      currentKeyReadings[i][j] = digitalRead(colPins[j]) == LOW ? true : false;
-    digitalWrite(rowPins[i], HIGH);
-  }
+// TODO: ..now get rid of diodes
+// can read rows in parallel as well on pico. not that that matters. just use other core for display etc.
+// NOTE: These get unrolled anyways so sub loop size doesnt matter
+for(int j = 0; j < COLS; j++){
+  
+	digitalWrite(colPins[j], HIGH);
+	for (int i = 0; i < ROWS+1; i++){
+	bool sol = digitalRead(rowPins[i]) == LOW ? false : true;
+//  Serial.print(j);
+//  Serial.print(i);
+//  Serial.println(sol);
+	currentKeyReadings[i][j] = sol;
+	
+	}
+	digitalWrite(colPins[j], LOW);
 }
+}
+// @DEPRECATED
+//void readKeys_DEPRECATED()
+//{
+//  for (int i = 0; i < ROWS; i++)
+//  {
+//    digitalWrite(rowPins[i], LOW);
+//    for (int j = 0; j < COLS; j++)
+//      // not a short only due to pullup resistor
+//      currentKeyReadings[i][j] = digitalRead(colPins[j]) == LOW ? true : false;
+//	// prevent a short from unselected rows by setting a reverse 
+//	// potential against the pullup pin (col).
+//    digitalWrite(rowPins[i], HIGH);
+//  }
+//}
 
 // Check already debouncing keys. If a key debounces, start chord recording.
 
@@ -273,59 +305,59 @@ void sendChordDiagnostic()
 // NKRO Keyboard Emulation
 
 #define ISNUM(x)	((x)>='0'&&(x)<='9')
-
-void sendChordNkro()
-{
-  // US keyboard mapping
-  
-  static const char NkroMapping[ROWS][COLS] =
-  {
-    {'1', '2', '3', '4', '5', '6', '7', '8', '9', '0'},		// upper row
-    {'q', 'w', 'e', 'r', 't', 'u', 'i', 'o', 'p', '['},		// middle row
-    {'a', 's', 'd', 'f', 'g', 'j', 'k', 'l', ';', '\''},	// lower row
-    {'c', 'v',  0,   0,   0,  'n', 'm',  0,   0,   0}		// vowel row
- };
-
-  int keyCounter = 0;							// chord index
-  char NkroKeys[ROWS * COLS];					// chord buffer
-//  int k;										// loop index
-  
-  // Calculate NKRO keys array using NkroMapping[][]
-  // Do not include nulls in the chord, to simplify processing below.
-  // Due to a Plover quirk, do not include more than one number key in the chord.
-  
-  for (int i = 0; i < ROWS; i++)
-    for (int j = 0; j < COLS; j++)
-      if (currentChord[i][j])
-	  {
-//        for (k = 0; k < keyCounter; k++)
-//        {
-//        	if (ISNUM(NkroKeys[k]) && ISNUM(NkroMapping[i][j]))
-//                break;
-//        }
-//        if (k != keyCounter)
-//        	continue;
-        NkroKeys[keyCounter] = NkroMapping[i][j];
-        if(NkroKeys[keyCounter])				// if mapped key
-          keyCounter++;
-      }
-	  
-  // Emulate keyboard key presses
-  // Because the Arduino USB library adheres to the version 1 USB spec, it
-  // only supports 6KRO.  To get around this, the first character is pressed,
-  // then each subsequent character is pressed and released and finally all
-  // characters are released.  Plover knows to reassemble this sequence into
-  // a single chord.
-  
-  for (int i = 0; i < keyCounter; i++)
-  {
-    Keyboard.press(NkroKeys[i]);
-    if(i)
-	  Keyboard.release(NkroKeys[i]);
-  }
-  Keyboard.releaseAll();
-}
- 
+//
+//void sendChordNkro()
+//{
+//  // US keyboard mapping
+//  
+//  static const char NkroMapping[ROWS][COLS] =
+//  {
+//    {'1', '2', '3', '4', '5', '6', '7', '8', '9', '0'},		// upper row
+//    {'q', 'w', 'e', 'r', 't', 'u', 'i', 'o', 'p', '['},		// middle row
+//    {'a', 's', 'd', 'f', 'g', 'j', 'k', 'l', ';', '\''},	// lower row
+//    {'c', 'v',  0,   0,   0,  'n', 'm',  0,   0,   0}		// vowel row
+// };
+//
+//  int keyCounter = 0;							// chord index
+//  char NkroKeys[ROWS * COLS];					// chord buffer
+////  int k;										// loop index
+//  
+//  // Calculate NKRO keys array using NkroMapping[][]
+//  // Do not include nulls in the chord, to simplify processing below.
+//  // Due to a Plover quirk, do not include more than one number key in the chord.
+//  
+//  for (int i = 0; i < ROWS; i++)
+//    for (int j = 0; j < COLS; j++)
+//      if (currentChord[i][j])
+//	  {
+////        for (k = 0; k < keyCounter; k++)
+////        {
+////        	if (ISNUM(NkroKeys[k]) && ISNUM(NkroMapping[i][j]))
+////                break;
+////        }
+////        if (k != keyCounter)
+////        	continue;
+//        NkroKeys[keyCounter] = NkroMapping[i][j];
+//        if(NkroKeys[keyCounter])				// if mapped key
+//          keyCounter++;
+//      }
+//	  
+//  // Emulate keyboard key presses
+//  // Because the Arduino USB library adheres to the version 1 USB spec, it
+//  // only supports 6KRO.  To get around this, the first character is pressed,
+//  // then each subsequent character is pressed and released and finally all
+//  // characters are released.  Plover knows to reassemble this sequence into
+//  // a single chord.
+//  
+//  for (int i = 0; i < keyCounter; i++)
+//  {
+//    Keyboard.press(NkroKeys[i]);
+//    if(i)
+//	  Keyboard.release(NkroKeys[i]);
+//  }
+//  Keyboard.releaseAll();
+//}
+// 
 // Gemini Protocol
 
 // The Gemini protocol sends a packet of 6 bytes.  The first byte
@@ -397,6 +429,8 @@ void sendChordTxBolt()
 		{0x01, 0x04, 0x10, 0x01, 0x08, 0x02, 0x08, 0x20, 0x02, 0x08},
 		{0x02, 0x04, 0x00, 0x00, 0x00, 0x10, 0x20, 0x00, 0x00, 0x00}
 	};
+	// TODO: this is redundant typecasting and incorrect?
+	// this is not the same as the above
 	static const byte TxBoltBytes[ROWS][COLS]=
 	{
 		{3, 3, 3, 3, 3, 3, 3, 3, 3, 3},
@@ -412,11 +446,13 @@ void sendChordTxBolt()
   for (int i = 0; i < ROWS; i++)
     for (int j = 0; j < COLS; j++)
       if (currentChord[i][j])
+	// TODO: what happens if two are in the same index
         chordBytes[TxBoltBytes[i][j]]|=TxBoltBits[i][j];
  
   // Send the packet
  
   for (int i = 0; i < TXBOLT_BYTES; i++)
+    // check if a row is not supposed to send
     if(chordBytes[i]&0x3F)
 	  Serial.write(chordBytes[i]);
   Serial.write((byte)0);						// send terminating byte
@@ -477,16 +513,18 @@ void sendChordProcat()
 
 void sendChord()
 {
-  if (Protocol == NKRO)
-    sendChordNkro();
-  if (Protocol == GEMINI)
-    sendChordGemini();
-  else if (Protocol == TXBOLT)
-    sendChordTxBolt();
-  else if (Protocol == PROCAT)
-    sendChordProcat();
-  else
-    sendChordDiagnostic();				// default
+	sendChordTxBolt();
+//  if (Protocol == NKRO)
+  //@DEPRECATED
+////    sendChordNkro();
+//  if (Protocol == GEMINI)
+//    sendChordGemini();
+//  else if (Protocol == TXBOLT)
+//    sendChordTxBolt();
+//  else if (Protocol == PROCAT)
+//    sendChordProcat();
+//  else
+//    sendChordDiagnostic();				// default
 }
 /*
 // Blink (turn off the LED) the specified number of times
@@ -520,36 +558,36 @@ void Blink
 */
 // Handle the options switches
 
-void Options()
-{
-	byte switchBytes[COLS];
-	byte switch1;						// protocol (SW35 or SW37)
-	byte switch2;						// brightness (SW36 OR SW38)
-	
-	// read the switch values
-	
-	digitalWrite(rowPins[4],LOW);
-	for(int i=0;i<COLS;i++)
-		switchBytes[i]=digitalRead(colPins[i])==LOW?1:0;
-	digitalWrite(rowPins[4],HIGH);
-	
-	// decode the switch values
-	
-	switch1=switchBytes[2]+2*switchBytes[3]+4*switchBytes[4];
-	switch2=switchBytes[7]+2*switchBytes[8]+4*switchBytes[9];
-	
-	// update options
-	
-	if(switch1<MAX_PROTOCOL)
-		Protocol=switch1;
-	else
-		Protocol=DIAGNOSTIC;			// default protocol
-
-	if(switch2!=Brightness)
-	{
-		Brightness=switch2;
-		analogWrite(ledPin,BrightnessLevels[Brightness]);
-	}
-}
-
-
+//void Options()
+//{
+//	byte switchBytes[COLS];
+//	byte switch1;						// protocol (SW35 or SW37)
+//	byte switch2;						// brightness (SW36 OR SW38)
+//	
+//	// read the switch values
+//	
+//	digitalWrite(rowPins[4],LOW);
+//	for(int i=0;i<COLS;i++)
+//		switchBytes[i]=digitalRead(colPins[i])==LOW?1:0;
+//	digitalWrite(rowPins[4],HIGH);
+//	
+//	// decode the switch values
+//	
+//	switch1=switchBytes[2]+2*switchBytes[3]+4*switchBytes[4];
+//	switch2=switchBytes[7]+2*switchBytes[8]+4*switchBytes[9];
+//	
+//	// update options
+//	
+//	if(switch1<MAX_PROTOCOL)
+//		Protocol=switch1;
+//	else
+//		Protocol=DIAGNOSTIC;			// default protocol
+//
+//	if(switch2!=Brightness)
+//	{
+//		Brightness=switch2;
+//		analogWrite(ledPin,BrightnessLevels[Brightness]);
+//	}
+//}
+//
+//

@@ -892,7 +892,7 @@ Wire Wire Line
 Wire Wire Line
 	4350 5350 4350 5850
 $Comp
-L Stenokey-rescue:Pico-MCU_RaspberryPi_and_Boards U1
+L MCU_RaspberryPi_and_Boards:Pico U1
 U 1 1 60B57F26
 P 8650 1700
 F 0 "U1" H 8650 2915 50  0000 C CNN
