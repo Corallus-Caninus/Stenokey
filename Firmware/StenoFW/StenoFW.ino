@@ -60,12 +60,12 @@
 
 // Configuration variables
 
-int rowPins[ROWS+1] = {10, 11, 12, 13, 14};
+int rowPins[ROWS] = {10, 11, 12, 13};
 int colPins[COLS] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
-int ledPin = 10;
+//int ledPin = 10;
 //unsigned long debounceMillis = 20; // TODO: 5
 // is this a long time? usb poll interval is like 10..
-unsigned long debounceMillis = 25; 
+unsigned long debounceMillis = 20; 
 
 // Keyboard state variables
 
@@ -77,7 +77,7 @@ unsigned long debouncingMicros[ROWS][COLS];
 
 // Option states
 
-byte Protocol;
+byte Protocol=3;
 byte Brightness;
 byte BrightnessLevels[8]=			// uniform CIE "lightness" levels
 {
@@ -99,16 +99,18 @@ void setup()
 {
 // TODO: test changed pinModes
 //  Keyboard.begin();
-  Serial.begin(115200);
-  for (int i = 0; i < COLS; i++)
+  Serial.begin(9600);
+  for (int i = 0; i < COLS; i++){
     pinMode(colPins[i], OUTPUT);
-  for (int i = 0; i < ROWS+1; i++)
-  {
-    Serial.println(rowPins[i]);
-    pinMode(rowPins[i], INPUT);
     digitalWrite(colPins[i], LOW);
   }
-  pinMode(ledPin, OUTPUT);
+  for (int i = 0; i < ROWS; i++)
+  {
+//    Serial.println(rowPins[i]);
+    pinMode(rowPins[i], INPUT_PULLDOWN);
+    
+  }
+//  pinMode(ledPin, OUTPUT);
   clearBooleanMatrices();
 }
 
@@ -156,18 +158,21 @@ void loop()
 // Josh: "Dvorak is a superior keyboard layout."
 void readKeys()
 {
-// TODO: ..now get rid of diodes
+// TODO: write a ROW high and read COLs? Less chance for false positives? a short is a short
+//    write ROWs has less bouncing but shouldnt really matter.
 // can read rows in parallel as well on pico. not that that matters. just use other core for display etc.
 // NOTE: These get unrolled anyways so sub loop size doesnt matter
 for(int j = 0; j < COLS; j++){
-  
 	digitalWrite(colPins[j], HIGH);
-	for (int i = 0; i < ROWS+1; i++){
+	for (int i = 0; i < ROWS; i++){
+//	bool sol 
 	bool sol = digitalRead(rowPins[i]) == LOW ? false : true;
+  currentKeyReadings[i][j] = sol;
 //  Serial.print(j);
 //  Serial.print(i);
 //  Serial.println(sol);
-	currentKeyReadings[i][j] = sol;
+//Serial.println(digitalRead(rowPins[0]));
+//	 = sol;
 	
 	}
 	digitalWrite(colPins[j], LOW);
