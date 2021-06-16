@@ -64,23 +64,26 @@ int rowPins[ROWS] = {10, 11, 12, 13};
 int colPins[COLS] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
 //int ledPin = 10;
 //unsigned long debounceMillis = 20; // TODO: 5
-// is this a long time? usb poll interval is like 10..
+// the time it takes to press and release a chord. used for bounceTrigger detection in chords.
 unsigned long debounceMillis = 20; 
+unsigned long chordInterval = 0;
+
 //maximum number of reads until switch is done bouncing. depends 
 // on polling rate and switch characteristics (rate of variable capacitance).
-unsigned int bounceReadCount = 50; //TODO: this is just a less readable way to say debounceMillis
+//used to detect shunting
+unsigned int bounceReadCount = 70; //TODO: this is just a less readable way to say debounceMillis and varies with polling rate (bad)
 unsigned int bounceCount = 0; //number of reads during chord
-//number of detected key releases in a chord
+//number of detected key releases in a chord. ensures press and release occures.
 unsigned int bounceTrigger = 0;
 
 // Keyboard state variables
 
 boolean isStrokeInProgress = false;
-boolean currentChord[ROWS][COLS];
+boolean currentChord[ROWS][COLS]; //this should be maskedKeyReadings and @DEPRECATED
 boolean currentKeyReadings[ROWS][COLS];			// key input buffer
 boolean maskedKeyReadings[ROWS][COLS];
-boolean debouncingKeys[ROWS][COLS];
-unsigned long debouncingMicros[ROWS][COLS];
+boolean debouncingKeys[ROWS][COLS]; //@DEPRECATED
+unsigned long debouncingMicros[ROWS][COLS]; //@DEPRECATED
 
 // Option states
 
@@ -107,6 +110,7 @@ void setup()
 // TODO: test changed pinModes
 //  Keyboard.begin();
   Serial.begin(115200);
+  chordInterval = millis();
 
 //  pinMode(ledPin, OUTPUT);
   clearBooleanMatrices();
@@ -174,32 +178,38 @@ void loop()
   // this also closes the loop on bounce/chord.
   // this is a workaround but will work
     isAnyKeyPressed = recordCurrentKeys();
-    isStrokeInProgress = isStrokeInProgress || isAnyKeyPressed;
+
+    if (millis() - chordInterval > debounceMillis){
+      isStrokeInProgress = isStrokeInProgress || isAnyKeyPressed;
+    }else{
+//      Serial.println("skip");
+      }
 
     //read bounce trigger condition, two edges must trigger: one for press and one for release
     //TODO: this should be a switch but mama didn raise me rite
     // Really this should be a 3 bit shifter but dad went out for smokes
     //    bounceTrigger << !isAnyKeyPressed && isStrokeInProgress;
     //    isStrokeInProgress = (!isAnyKeyPressed && isStrokeInProgress);
+    //TODO: false positives here catching bounce echo on release from chord
+    //    debounce after chord. how can this be consolidated with bounceCount?
+    // chordInterval to prevent bounce on release.
     if (bounceTrigger == 0 && isAnyKeyPressed == 0 && isStrokeInProgress){
       bounceTrigger = 1;
       isStrokeInProgress = 0;
+//      Serial.println("first edge");
+      chordInterval = millis();
     }
     else if (bounceTrigger == 1 && isAnyKeyPressed == 0 && isStrokeInProgress){
       bounceTrigger = 2;
       isStrokeInProgress = 0;
+//      Serial.println("second edge");
     }
-//    if (bounceTrigger == 2){
-//      Serial.println("bounceTrigger");
-//      }
-      
-    //    bounceTrigger << !isAnyKeyPressed && isStrokeInProgress;
-//    isStrokeInProgress = (!isAnyKeyPressed && isStrokeInProgress);
-
+     
   // If all keys have been released, send the chord and reset the global state
   if ((!isAnyKeyPressed && (bounceCount > bounceReadCount)) || (bounceTrigger == 2/*bounce read condition*/))
   {
     //TODO:Read one more time for release bounce
+    // TODO need to read more
    for(int z = 0; z < bounceReadCount; z++){
     readKeys();
     for(int i=0; i<ROWS; i++){
@@ -212,34 +222,23 @@ void loop()
     clearBooleanMatrices();
     bounceCount = 0;
     bounceTrigger = 0;
+    chordInterval = millis();
+
+    // filter chord release bounce
+    //TODO this doesnt work because bounce goes both ways
+//    for (int i=0; i < 2*bounceCount; i++){
+//        isAnyKeyPressed = isAnyKeyPressed || recordCurrentKeys();
+//    }
+//    while(isAnyKeyPressed || chordInterval < 2*debounceMillis){
+//      Serial.println("bouncing after chord..");
+//      isAnyKeyPressed = isAnyKeyPressed || recordCurrentKeys();
+//    }
+//    bounceCount = 0;
+//    clearBooleanMatrices();
+//    chordInterval = millis();
+//    isAnyKeyPressed = false;
   }
 }
-
-// Read all keys
-
-// Josh: "Dvorak is a superior keyboard layout."
-//void readKeys_DEPRECATED()
-//{
-//// TODO: write a ROW high and read COLs? Cant read multiple rows in chord
-//
-//// can read rows in parallel as well on pico. not that that matters. just use other core for display etc.
-//// NOTE: These get unrolled anyways so sub loop size doesnt matter
-//for(int j = 0; j < COLS; j++){
-//  	digitalWrite(colPins[j], LOW);
-//  	for (int i = 0; i < ROWS; i++){
-////	bool sol 
-//  	bool sol = digitalRead(rowPins[i]) == LOW ? true : false;
-//    currentKeyReadings[i][j] = sol;
-////  Serial.print(j);
-////  Serial.print(i);
-////  Serial.println(sol);
-////Serial.println(digitalRead(rowPins[0]));
-////	 = sol;
-//	
-//  	}
-//  	digitalWrite(colPins[j], HIGH);
-//  }
-//}
 
 //this causes lots of writes but should be 
 //sufficiently fast but look to loop1 logic if necessary  
@@ -247,9 +246,7 @@ void loop()
 //SD card and plover lookup etc.
 //Does this need to be done n! times to find which keys are pressed?
 
-//TODO: read all row-columns then column rows and matrix mask out false positives?
-//TODO: fix bouncer
-
+// read all row-columns then column rows and matrix mask out false positives?
 //COLUMN-ROW
 void readColKeys(){
   //SETUP:
@@ -280,7 +277,7 @@ void readColKeys(){
   }
 }
 
-//TODO just inline this if it works
+//TODO just inline this with readColKeys
 //ROW-COLUMN
 void readRowKeys(){
    //SETUP:
@@ -401,6 +398,7 @@ boolean recordCurrentKeys()
       //if (currentKeyReadings[i][j] == true)
       //TODO masked keys is rolled over this doesnt make sense now
       //     maskedKeys should be currentChord since not debouncing now
+      
       if (currentKeyReadings[i][j] == true)
 	  {
         isAnyKeyPressed = true;
