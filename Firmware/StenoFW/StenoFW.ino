@@ -65,13 +65,13 @@ int colPins[COLS] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
 //int ledPin = 10;
 //unsigned long debounceMillis = 20; // TODO: 5
 // the time it takes to press and release a chord. used for bounceTrigger detection in chords.
-unsigned long debounceMillis = 20; 
+unsigned long debounceMillis = 30; 
 unsigned long chordInterval = 0;
 
 //maximum number of reads until switch is done bouncing. depends 
 // on polling rate and switch characteristics (rate of variable capacitance).
 //used to detect shunting
-unsigned int bounceReadCount = 70; //TODO: this is just a less readable way to say debounceMillis and varies with polling rate (bad)
+unsigned int bounceReadCount = 80; //TODO: this is just a less readable way to say debounceMillis and varies with polling rate (bad)
 unsigned int bounceCount = 0; //number of reads during chord
 //number of detected key releases in a chord. ensures press and release occures.
 unsigned int bounceTrigger = 0;
@@ -181,9 +181,7 @@ void loop()
 
     if (millis() - chordInterval > debounceMillis){
       isStrokeInProgress = isStrokeInProgress || isAnyKeyPressed;
-    }else{
-//      Serial.println("skip");
-      }
+    }
 
     //read bounce trigger condition, two edges must trigger: one for press and one for release
     //TODO: this should be a switch but mama didn raise me rite
@@ -222,21 +220,8 @@ void loop()
     clearBooleanMatrices();
     bounceCount = 0;
     bounceTrigger = 0;
+    //filter chord release bounce
     chordInterval = millis();
-
-    // filter chord release bounce
-    //TODO this doesnt work because bounce goes both ways
-//    for (int i=0; i < 2*bounceCount; i++){
-//        isAnyKeyPressed = isAnyKeyPressed || recordCurrentKeys();
-//    }
-//    while(isAnyKeyPressed || chordInterval < 2*debounceMillis){
-//      Serial.println("bouncing after chord..");
-//      isAnyKeyPressed = isAnyKeyPressed || recordCurrentKeys();
-//    }
-//    bounceCount = 0;
-//    clearBooleanMatrices();
-//    chordInterval = millis();
-//    isAnyKeyPressed = false;
   }
 }
 
@@ -277,7 +262,6 @@ void readColKeys(){
   }
 }
 
-//TODO just inline this with readColKeys
 //ROW-COLUMN
 void readRowKeys(){
    //SETUP:
@@ -300,21 +284,6 @@ void readRowKeys(){
 //      digitalWrite(rowPins[i], LOW);
       pinMode(rowPins[i], INPUT_PULLUP);
 //      //mask out false positives
-
-//      if (currentKeyReadings[i][j] == (!digitalRead(rowPins[i]))){
-//        if (currentKeyReadings[i][j] == 1){
-//        Serial.println("");Serial.println("");
-//        Serial.println("true positive ");
-//        Serial.print("Row:");
-//        Serial.print(i);
-//        Serial.print("Col:");
-//        Serial.println(j);
-//        Serial.print(currentKeyReadings[i][j]);
-//        Serial.println(!digitalRead(rowPins[i]));
-//        Serial.println("with solution:");
-//        Serial.println((currentKeyReadings[i][j] && !digitalRead(rowPins[i])));
-//        }
-//      }
       currentKeyReadings[i][j] = (currentKeyReadings[i][j] && (!digitalRead(rowPins[i])));
       
       //reset to prevent grounding
@@ -324,12 +293,54 @@ void readRowKeys(){
     digitalWrite(colPins[j], HIGH);
   }
 }
-
-//first we read columns then rows
+//inline readRowKeys with readColKeys
 void readKeys(){
-  readColKeys();
-  readRowKeys();
+   //SETUP:
+  for (int i = 0; i < ROWS; i++){
+    pinMode(rowPins[i], OUTPUT);
+    digitalWrite(rowPins[i], HIGH);
+  }
+  for (int i = 0; i < COLS; i++)
+  {
+      pinMode(colPins[i], OUTPUT);
+      digitalWrite(colPins[i], HIGH);
+    
+  }
+
+  //LOOP
+  for (int j = 0; j < COLS; j++)
+  {
+    
+    for (int i = 0; i < ROWS; i++){
+      //READ ON COLUMN
+      digitalWrite(rowPins[i], LOW);
+      pinMode(colPins[j], INPUT_PULLUP);
+      currentKeyReadings[i][j] = !digitalRead(colPins[j]);
+      
+      //reset to prevent grounding
+      pinMode(colPins[j], OUTPUT);
+      digitalWrite(colPins[j],HIGH);
+      digitalWrite(rowPins[i], HIGH);
+
+      //READ ON ROW
+      digitalWrite(colPins[j], LOW);
+      pinMode(rowPins[i], INPUT_PULLUP);
+      //mask out false positives
+      currentKeyReadings[i][j] = (currentKeyReadings[i][j] && (!digitalRead(rowPins[i])));
+      
+      //reset to prevent grounding
+      pinMode(rowPins[i], OUTPUT);
+      digitalWrite(rowPins[i],HIGH);
+      digitalWrite(colPins[j],HIGH);
+    }
+  }
 }
+//@DEPRECATED
+//first we read columns then rows
+//void readKeys(){
+//  readColKeys();
+//  readRowKeys();
+//}
 
 void bounceRead()
 {
