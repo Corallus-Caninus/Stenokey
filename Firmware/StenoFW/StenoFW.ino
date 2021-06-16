@@ -66,12 +66,19 @@ int colPins[COLS] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
 //unsigned long debounceMillis = 20; // TODO: 5
 // is this a long time? usb poll interval is like 10..
 unsigned long debounceMillis = 20; 
+//maximum number of reads until switch is done bouncing. depends 
+// on polling rate and switch characteristics (rate of variable capacitance).
+unsigned int bounceReadCount = 50; //TODO: this is just a less readable way to say debounceMillis
+unsigned int bounceCount = 0; //number of reads during chord
+//number of detected key releases in a chord
+unsigned int bounceTrigger = 0;
 
 // Keyboard state variables
 
 boolean isStrokeInProgress = false;
 boolean currentChord[ROWS][COLS];
 boolean currentKeyReadings[ROWS][COLS];			// key input buffer
+boolean maskedKeyReadings[ROWS][COLS];
 boolean debouncingKeys[ROWS][COLS];
 unsigned long debouncingMicros[ROWS][COLS];
 
@@ -99,17 +106,8 @@ void setup()
 {
 // TODO: test changed pinModes
 //  Keyboard.begin();
-  Serial.begin(9600);
-  for (int i = 0; i < COLS; i++){
-    pinMode(colPins[i], OUTPUT);
-    digitalWrite(colPins[i], LOW);
-  }
-  for (int i = 0; i < ROWS; i++)
-  {
-//    Serial.println(rowPins[i]);
-    pinMode(rowPins[i], INPUT_PULLDOWN);
-    
-  }
+  Serial.begin(115200);
+
 //  pinMode(ledPin, OUTPUT);
   clearBooleanMatrices();
 }
@@ -123,76 +121,230 @@ void loop()
   //Options();
 
   readKeys();
+  //TODO this is the wrong way to solve non-shunted strokes
+  int newRead = 0;
+  //TODO inline with readKeys
+  for(int i=0; i<ROWS; i++){
+    for(int j=0; j<COLS;j++){
+//      Serial.print(i);
+//      Serial.print(",");
+//      Serial.print(j);
+//      Serial.print(": ");
+//      Serial.println(maskedKeyReadings[i][j]);
+      //check for grounding where a false key release is detected
+        if (currentKeyReadings[i][j] != 0){
+            newRead = 1;
+        }
+        maskedKeyReadings[i][j] = maskedKeyReadings[i][j] || currentKeyReadings[i][j];    
+      }
+    }
+    bounceCount += newRead;
   
   boolean isAnyKeyPressed = true;
   
   // If stroke is not in progress, check debouncing keys
-  
-  if (!isStrokeInProgress)
-  {
-    checkAlreadyDebouncingKeys();
-    // TODO: bad logic due to globals
-    if (!isStrokeInProgress)
-		checkNewDebouncingKeys();
-  }
+//  if (!isStrokeInProgress)
+//  {
+//    checkAlreadyDebouncingKeys();
+//    // TODO: bad logic due to globals
+//    if (!isStrokeInProgress)
+//		checkNewDebouncingKeys();
+//  }
   
   // If any key was pressed, record all pressed keys
-  
-  if (isStrokeInProgress)
-  {
+  //TODO: need to read rising and falling edges
+  //NOTE: this relies on bouncing to read keys since they ground out without diodes
+//   what is the address limit where bouncing creates interference and keys begin to not be read? at what polling rate? With what probability?
+  //whats the minimum number of pins? N rows Y columns: square st N == Y. Can save 2 pins in this project by addressing 6x6.
+  //TODO: since we are filtering true positives we can 
+  //      just mask || along rising and falling edges
+  //
+  // rising edge is any keypress falling edge is no keys read and more than one reading has been read since rising edge.   //
+  //  time between readings = debounce: rising edge is read any keypress falling edge is no keys read and more than one debounce_reading has been read since rising edge. 
+  //OR
+  //CURRENTLY BEST:
+  //set limit on reads instead of bounce time. doesnt make too much of a difference 
+  //1. if > 20-30 readings dont wait for falling edge but still send on falling edge. 
+  //2. two falling edges detected (release of ground pins)
+  // || mask everything between edges then send chord when no keys are pressed and bounce condition is met.
+  // CLOSED_LOOP: num_readings vs OPEN_LOOP: micros
+  //
+  // (observed two states 1. keys always reading 2. bounce on release) 
+  // | take two readings and || them together halt until 2
+  // this also closes the loop on bounce/chord.
+  // this is a workaround but will work
     isAnyKeyPressed = recordCurrentKeys();
-  }
-  
+    isStrokeInProgress = isStrokeInProgress || isAnyKeyPressed;
+
+    //read bounce trigger condition, two edges must trigger: one for press and one for release
+    //TODO: this should be a switch but mama didn raise me rite
+    // Really this should be a 3 bit shifter but dad went out for smokes
+    //    bounceTrigger << !isAnyKeyPressed && isStrokeInProgress;
+    //    isStrokeInProgress = (!isAnyKeyPressed && isStrokeInProgress);
+    if (bounceTrigger == 0 && isAnyKeyPressed == 0 && isStrokeInProgress){
+      bounceTrigger = 1;
+      isStrokeInProgress = 0;
+    }
+    else if (bounceTrigger == 1 && isAnyKeyPressed == 0 && isStrokeInProgress){
+      bounceTrigger = 2;
+      isStrokeInProgress = 0;
+    }
+//    if (bounceTrigger == 2){
+//      Serial.println("bounceTrigger");
+//      }
+      
+    //    bounceTrigger << !isAnyKeyPressed && isStrokeInProgress;
+//    isStrokeInProgress = (!isAnyKeyPressed && isStrokeInProgress);
+
   // If all keys have been released, send the chord and reset the global state
-  
-  if (!isAnyKeyPressed)
+  if ((!isAnyKeyPressed && (bounceCount > bounceReadCount)) || (bounceTrigger == 2/*bounce read condition*/))
   {
+    //TODO:Read one more time for release bounce
+   for(int z = 0; z < bounceReadCount; z++){
+    readKeys();
+    for(int i=0; i<ROWS; i++){
+      for(int j=0; j<COLS;j++){
+        maskedKeyReadings[i][j] = maskedKeyReadings[i][j] || currentKeyReadings[i][j];    
+      }
+    }
+  }
     sendChord();
     clearBooleanMatrices();
-    isStrokeInProgress = false;
+    bounceCount = 0;
+    bounceTrigger = 0;
   }
 }
 
 // Read all keys
 
 // Josh: "Dvorak is a superior keyboard layout."
-void readKeys()
-{
-// TODO: write a ROW high and read COLs? Less chance for false positives? a short is a short
-//    write ROWs has less bouncing but shouldnt really matter.
-// can read rows in parallel as well on pico. not that that matters. just use other core for display etc.
-// NOTE: These get unrolled anyways so sub loop size doesnt matter
-for(int j = 0; j < COLS; j++){
-	digitalWrite(colPins[j], HIGH);
-	for (int i = 0; i < ROWS; i++){
-//	bool sol 
-	bool sol = digitalRead(rowPins[i]) == LOW ? false : true;
-  currentKeyReadings[i][j] = sol;
-//  Serial.print(j);
-//  Serial.print(i);
-//  Serial.println(sol);
-//Serial.println(digitalRead(rowPins[0]));
-//	 = sol;
-	
-	}
-	digitalWrite(colPins[j], LOW);
-}
-}
-// @DEPRECATED
 //void readKeys_DEPRECATED()
 //{
-//  for (int i = 0; i < ROWS; i++)
-//  {
-//    digitalWrite(rowPins[i], LOW);
-//    for (int j = 0; j < COLS; j++)
-//      // not a short only due to pullup resistor
-//      currentKeyReadings[i][j] = digitalRead(colPins[j]) == LOW ? true : false;
-//	// prevent a short from unselected rows by setting a reverse 
-//	// potential against the pullup pin (col).
-//    digitalWrite(rowPins[i], HIGH);
+//// TODO: write a ROW high and read COLs? Cant read multiple rows in chord
+//
+//// can read rows in parallel as well on pico. not that that matters. just use other core for display etc.
+//// NOTE: These get unrolled anyways so sub loop size doesnt matter
+//for(int j = 0; j < COLS; j++){
+//  	digitalWrite(colPins[j], LOW);
+//  	for (int i = 0; i < ROWS; i++){
+////	bool sol 
+//  	bool sol = digitalRead(rowPins[i]) == LOW ? true : false;
+//    currentKeyReadings[i][j] = sol;
+////  Serial.print(j);
+////  Serial.print(i);
+////  Serial.println(sol);
+////Serial.println(digitalRead(rowPins[0]));
+////	 = sol;
+//	
+//  	}
+//  	digitalWrite(colPins[j], HIGH);
 //  }
 //}
 
+//this causes lots of writes but should be 
+//sufficiently fast but look to loop1 logic if necessary  
+//would prefer to save extra core and pins for next versions features like 
+//SD card and plover lookup etc.
+//Does this need to be done n! times to find which keys are pressed?
+
+//TODO: read all row-columns then column rows and matrix mask out false positives?
+//TODO: fix bouncer
+
+//COLUMN-ROW
+void readColKeys(){
+  //SETUP:
+  for (int i = 0; i < ROWS; i++){
+    pinMode(rowPins[i], OUTPUT);
+    digitalWrite(rowPins[i], HIGH);
+  }
+  for (int i = 0; i < COLS; i++)
+  {
+      pinMode(colPins[i], OUTPUT);
+      digitalWrite(colPins[i], HIGH);     
+  }
+
+  //LOOP
+  for (int i = 0; i < ROWS; i++)
+  {
+    digitalWrite(rowPins[i], LOW);
+    for (int j = 0; j < COLS; j++){
+//      digitalWrite(colPins[j], LOW);
+      pinMode(colPins[j], INPUT_PULLUP);
+      currentKeyReadings[i][j] = !digitalRead(colPins[j]);
+      
+      //reset to prevent grounding
+      pinMode(colPins[j], OUTPUT);
+      digitalWrite(colPins[j],HIGH);
+    }
+    digitalWrite(rowPins[i], HIGH);
+  }
+}
+
+//TODO just inline this if it works
+//ROW-COLUMN
+void readRowKeys(){
+   //SETUP:
+  for (int i = 0; i < ROWS; i++){
+    pinMode(rowPins[i], OUTPUT);
+    digitalWrite(rowPins[i], HIGH);
+  }
+  for (int i = 0; i < COLS; i++)
+  {
+      pinMode(colPins[i], OUTPUT);
+      digitalWrite(colPins[i], HIGH);
+    
+  }
+
+  //LOOP
+  for (int j = 0; j < COLS; j++)
+  {
+    digitalWrite(colPins[j], LOW);
+    for (int i = 0; i < ROWS; i++){
+//      digitalWrite(rowPins[i], LOW);
+      pinMode(rowPins[i], INPUT_PULLUP);
+//      //mask out false positives
+
+//      if (currentKeyReadings[i][j] == (!digitalRead(rowPins[i]))){
+//        if (currentKeyReadings[i][j] == 1){
+//        Serial.println("");Serial.println("");
+//        Serial.println("true positive ");
+//        Serial.print("Row:");
+//        Serial.print(i);
+//        Serial.print("Col:");
+//        Serial.println(j);
+//        Serial.print(currentKeyReadings[i][j]);
+//        Serial.println(!digitalRead(rowPins[i]));
+//        Serial.println("with solution:");
+//        Serial.println((currentKeyReadings[i][j] && !digitalRead(rowPins[i])));
+//        }
+//      }
+      currentKeyReadings[i][j] = (currentKeyReadings[i][j] && (!digitalRead(rowPins[i])));
+      
+      //reset to prevent grounding
+      pinMode(rowPins[i], OUTPUT);
+      digitalWrite(rowPins[i],HIGH);
+    }
+    digitalWrite(colPins[j], HIGH);
+  }
+}
+
+//first we read columns then rows
+void readKeys(){
+  readColKeys();
+  readRowKeys();
+}
+
+void bounceRead()
+{
+  for (int i = 0; i < ROWS; i++)
+  {
+    for (int j = 0; j < COLS; j++)
+  {
+        currentChord[i][j] = true;
+        
+      }
+    }
+  }
 // Check already debouncing keys. If a key debounces, start chord recording.
 
 void checkAlreadyDebouncingKeys()
@@ -201,7 +353,8 @@ void checkAlreadyDebouncingKeys()
   {
     for (int j = 0; j < COLS; j++)
 	{
-      if (debouncingKeys[i][j] == true && currentKeyReadings[i][j] == false)
+     //if (debouncingKeys[i][j] == true && currentKeyReadings[i][j] == false)
+     if (debouncingKeys[i][j] == true && maskedKeyReadings[i][j] == false)
 	  {
         debouncingKeys[i][j] = false;
         continue;
@@ -224,7 +377,8 @@ void checkNewDebouncingKeys()
   {
     for (int j = 0; j < COLS; j++)
 	{
-      if (currentKeyReadings[i][j] == true && debouncingKeys[i][j] == false)
+      //if (currentKeyReadings[i][j] == true && debouncingKeys[i][j] == false)
+      if (maskedKeyReadings[i][j] == true && debouncingKeys[i][j] == false)
 	  {
         debouncingKeys[i][j] = true;
         debouncingMicros[i][j] = micros();
@@ -237,17 +391,21 @@ void checkNewDebouncingKeys()
 
 boolean recordCurrentKeys()
 {
+  //TODO not sending on isAnyKeyPressed condition
   boolean isAnyKeyPressed = false;
   
   for (int i = 0; i < ROWS; i++)
   {
     for (int j = 0; j < COLS; j++)
 	{
+      //if (currentKeyReadings[i][j] == true)
+      //TODO masked keys is rolled over this doesnt make sense now
+      //     maskedKeys should be currentChord since not debouncing now
       if (currentKeyReadings[i][j] == true)
 	  {
-        currentChord[i][j] = true;
         isAnyKeyPressed = true;
       }
+      currentChord[i][j] = maskedKeyReadings[i][j];
     }
   }
   return isAnyKeyPressed;
@@ -260,6 +418,7 @@ void clearBooleanMatrices()
   clearBooleanMatrix(currentChord, false);
   clearBooleanMatrix(currentKeyReadings, false);
   clearBooleanMatrix(debouncingKeys, false);
+  clearBooleanMatrix(maskedKeyReadings, false);
 }
 
 // Set all values of the passed matrix to the given value
@@ -519,6 +678,7 @@ void sendChordProcat()
 void sendChord()
 {
 	sendChordTxBolt();
+
 //  if (Protocol == NKRO)
   //@DEPRECATED
 ////    sendChordNkro();
