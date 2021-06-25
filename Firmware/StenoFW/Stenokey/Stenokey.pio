@@ -1,0 +1,408 @@
+; Bounce Read by Joshua Ward
+
+; NOTE: this algorithm supports detecting bounces on matrix connected switches directly to pico pins with no additional components.
+; ideally NxN square matrices save pin counts. square matrices only need one program: Read_Nx2 configured for row and col pin mappings.
+; here we also consider irregular matrices. key presses are detected on key release.
+
+
+.program read_key_col
+;GLOBAL CONFIGURATION
+.define PUBLIC COLS 10 ;NOTE: cannot be larger than 2 bytes
+.define pio 0
+.define synchronize_cycles 43  ; = (number of cycles this SM is offline) - (offline instructions)
+.define num_sms 5 ;this means we need 2 pios
+
+.side_set 1 opt ;NOTE sideset cannot overlap will overide flip flops
+
+.wrap_target
+synchronize:
+; SMs required = (cols + rows) / 2
+; number of cycles this SM is offline = (SMs) * (online cycles)
+    ;NOTE: can jmp in place on registers if instr bound but we are not
+    irq wait pio rel
+configure:
+    ;TODO this could be replaced with two words if necessary
+    set x 2 //..00010 = out 1 out 0
+    mov osr x
+read_keys:
+    ; TODO does enabling pullups change write behavior?
+    ; TODO just do relative interrupt? may not be able to use scratch as value since this isnt event based IRQ wastes inst/cycl
+
+    ; ONLINE: THIS HOLDS MATRIX LOCK
+    ; online for 8 clocks offline for 48
+    out pindirs 1 ;read
+    set pins 1 side 0
+    in pins COLS ;read immediately, NOTE: slew must be done in 1 cycle not the default of two
+    set pins 0 side 1
+    in pins COLS
+cleanup: ;TODO: may need to do this between addresses pulldown is high why would this be different?
+    ; reset all pins high
+    out pindirs 1 ;write
+    set pins 1
+    out pins 1
+   irq clear (pio+1) rel
+    ; OFFLINE: MATRIX LOCK FREE
+    ; everything here until wrap wont change switch polling rate since this SM is done reading on the line
+
+; TODO: this has a worse case that someone fills DMA faster than core can process (single key press also spams the buffer)
+;       shouldnt happen for keyboard but should be noted for other applications and have a dedicated core in 2040.
+;  may need to dedicate last SM to processing if DMA can be configured
+send_if_read:
+    ;write to dma if new value is present
+    mov x isr ;copy for cmp
+    jmp !x return_with_synch_delay ;this branch always takes 1 cycle regardless of call graph
+write:
+    push
+.wrap ;this makes up for write delay
+
+return_with_synch_delay:
+    jmp synchronize
+
+.program read_key_col_repeat
+;GLOBAL CONFIGURATION
+.define PUBLIC COLS 10 ;NOTE: cannot be larger than 2 bytes
+.define pio 1
+.define synchronize_cycles 43  ; = (number of cycles this SM is offline) - (offline instructions)
+.define num_sms 5 ;this means we need 2 pios
+
+.side_set 1 opt ;NOTE sideset cannot overlap will overide flip flops
+
+.wrap_target
+synchronize:
+; SMs required = (cols + rows) / 2
+; number of cycles this SM is offline = (SMs) * (online cycles)
+    ;NOTE: can jmp in place on registers if instr bound but we are not
+    irq wait pio rel
+
+configure:
+    ;TODO this could be replaced with two words if necessary
+    set x 2 //..00010 = out 1 out 0
+    mov osr x
+read_keys:
+    ; TODO does enabling pullups change write behavior?
+    ; TODO just do relative interrupt? may not be able to use scratch as value since this isnt event based IRQ wastes inst/cycl
+
+    ; ONLINE: THIS HOLDS MATRIX LOCK
+    ; online for 8 clocks offline for 48
+    out pindirs 1 ;read
+    set pins 1 side 0
+    in pins COLS ;read immediately, NOTE: slew must be done in 1 cycle not the default of two
+    set pins 0 side 1
+    in pins COLS
+cleanup: ;TODO: may need to do this between addresses pulldown is high why would this be different? No not doing true positives in same iteration
+    ; reset all pins high
+    out pindirs 1 ;write
+    set pins 1
+    out pins 1
+    irq clear (pio+1) rel
+    ; OFFLINE: MATRIX LOCK FREE
+    ; everything here until wrap wont change switch polling rate since this SM is done reading on the line
+
+; TODO: this has a worse case that someone fills DMA faster than core can process (single key press also spams the buffer)
+;       shouldnt happen for keyboard but should be noted for other applications and have a dedicated core in 2040.
+;  may need to dedicate last SM to processing if DMA can be configured
+send_if_read:
+    ;write to dma if new value is present
+    mov x isr ;copy for cmp
+    jmp !x return_with_synch_delay ;this branch always takes 1 cycle regardless of call graph
+write:
+    push
+.wrap ;this makes up for write delay
+
+return_with_synch_delay:
+    jmp synchronize
+
+
+.program read_key_row_first
+;GLOBAL CONFIGURATION
+.define PUBLIC ROWS 4 ;NOTE: cannot be larger than 2 bytes
+.define PUBLIC pio 0
+.define synchronize_cycles 43  ; = (number of cycles this SM is offline) - (offline instructions)
+.define num_sms 2
+
+.side_set 1 opt ;NOTE sideset cannot overlap will overide flip flops
+
+.wrap_target
+synchronize:
+; SMs required = (cols + rows) / 2
+; number of cycles this SM is offline = (SMs) * (online cycles)
+    ;NOTE: can jmp in place on registers if instr bound but we are not
+    ;TODO just synchronize on IRQ and copy this
+    irq wait pio rel
+
+configure:
+    ;TODO this could be replaced with two words if necessary
+    set x 2 //..00010 = out 1 out 0
+    mov osr x
+read_keys:
+    ; TODO does enabling pullups change write behavior?
+    ; TODO just do relative interrupt? may not be able to use scratch as value since this isnt event based IRQ wastes inst/cycl
+
+    ; ONLINE: THIS HOLDS MATRIX LOCK
+    ; online for 8 clocks offline for 48
+    out pindirs 1 ;read
+    set pins 1 side 0
+    in pins ROWS ;read immediately, NOTE: slew must be done in 1 cycle not the default of two
+    set pins 0 side 1
+    in pins ROWS
+cleanup: ;TODO: may need to do this between addresses pulldown is high why would this be different?
+    ; reset all pins high
+    out pindirs 1 ;write
+    set pins 1
+    out pins 1
+    irq clear (pio+1) rel
+    ; OFFLINE: MATRIX LOCK FREE
+    ; everything here until wrap wont change switch polling rate since this SM is done reading on the line
+
+; TODO: this has a worse case that someone fills DMA faster than core can process (single key press also spams the buffer)
+;       shouldnt happen for keyboard but should be noted for other applications and have a dedicated core in 2040.
+;  may need to dedicate last SM to processing if DMA can be configured
+send_if_read:
+    ;write to dma if new value is present
+    mov x isr ;copy for cmp
+    jmp !x return_with_synch_delay ;this branch always takes 1 cycle regardless of call graph
+write:
+    push
+.wrap ;this makes up for write delay
+
+return_with_synch_delay:
+    jmp synchronize
+
+
+.program read_key_row_second ;loops back to first SM
+;NOTE: MUST BE LAST SM IN SEQUENCE: 7 where first is 0
+;GLOBAL CONFIGURATION
+.define PUBLIC ROWS 4 ;NOTE: cannot be larger than 2 bytes
+.define PUBLIC pio 0
+.define synchronize_cycles 43  ; = (number of cycles this SM is offline) - (offline instructions)
+.define num_sms 2
+
+.side_set 1 opt ;NOTE sideset cannot overlap will overide flip flops
+
+.wrap_target
+synchronize:
+; SMs required = (cols + rows) / 2
+; number of cycles this SM is offline = (SMs) * (online cycles)
+    ;NOTE: can jmp in place on registers if instr bound but we are not
+    ;TODO just synchronize on IRQ and copy this
+    irq wait pio rel
+
+configure:
+    ;TODO this could be replaced with two words if necessary
+    set x 2 //..00010 = out 1 out 0
+    mov osr x
+read_keys:
+    ; TODO does enabling pullups change write behavior?
+    ; TODO just do relative interrupt? may not be able to use scratch as value since this isnt event based IRQ wastes inst/cycl
+
+    ; ONLINE: THIS HOLDS MATRIX LOCK
+    ; online for 8 clocks offline for 48
+    out pindirs 1 ;read
+    set pins 1 side 0
+    in pins ROWS ;read immediately, NOTE: slew must be done in 1 cycle not the default of two
+    set pins 0 side 1
+    in pins ROWS
+cleanup: ;TODO: may need to do this between addresses pulldown is high why would this be different?
+    ; reset all pins high
+    out pindirs 1 ;write
+    set pins 1
+    out pins 1
+    irq clear 0
+    ; OFFLINE: MATRIX LOCK FREE
+    ; everything here until wrap wont change switch polling rate since this SM is done reading on the line
+
+; TODO: this has a worse case that someone fills DMA faster than core can process (single key press also spams the buffer)
+;       shouldnt happen for keyboard but should be noted for other applications and have a dedicated core in 2040.
+;  may need to dedicate last SM to processing if DMA can be configured
+send_if_read:
+    ;write to dma if new value is present
+    mov x isr ;copy for cmp
+    jmp !x return_with_synch_delay ;this branch always takes 1 cycle regardless of call graph
+write:
+    push
+.wrap ;this makes up for write delay
+
+return_with_synch_delay:
+    jmp synchronize
+
+% c-sdk{
+
+    //second write pin is always consecutive so we dont need to pass that in
+    static inline void read_key_row_first(PIO pio, uint sm, uint offset, uint startReadPin, uint endReadPin, uint writePin){
+        for (int i=startReadPin; i<startReadPin+endReadPin; i++){
+            pio_gpio_init(pio, i);
+            gpio_pull_up(i);//this should be fine for output just another Vcc on the line
+            gpio_set_input_hysteresis_enabled(i,0); //disable schmitt trigger to catch pulses as signal
+            gpio_set_slew_rate(i, 1); //set 1 clock slew NOTE: this and schmitt disable may cause instability
+            //NOTE: may need to change drive strength since brown out can occur when writting all columns high
+        }
+        pio_sm_config c = read_key_row_first_get_default_config(offset);
+        sm_config_set_in_shift(&c, true, false, 2*read_key_row_first_ROWS);
+        sm_config_set_set_pins(&c, writePin+1, 1); //first address
+        sm_config_set_side_pins(&c, writePin, 1); //second address
+        sm_config_set_out_pins(&c, startReadPin, endReadPin); //read pins
+        pio_sm_set_in_pins(pio, sm, startReadPin); //read pins
+        sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_RX);
+
+        pio_sm_init(pio,sm,offset,&c);
+
+        pio_sm_set_enabled(pio,sm,true);
+    }
+
+    static inline void read_key_row_second(PIO pio, uint sm, uint offset, uint startReadPin, uint endReadPin, uint writePin){
+        for (int i=startReadPin; i<startReadPin+endReadPin; i++){
+            pio_gpio_init(pio, i);
+            gpio_pull_up(i);//this should be fine for output just another Vcc on the line
+            gpio_set_input_hysteresis_enabled(i,0); //disable schmitt trigger to catch pulses as signal
+            gpio_set_slew_rate(i, 1); //set 1 clock slew NOTE: this and schmitt disable may cause instability
+            //NOTE: may need to change drive strength since brown out can occur when writting all columns high
+        }
+        pio_sm_config c = read_key_row_second_get_default_config(offset);
+        sm_config_set_in_shift(&c, true, false, 2*read_key_row_second_ROWS);
+        sm_config_set_set_pins(&c, writePin+1, 1); //first address
+        sm_config_set_side_pins(&c, writePin, 1); //second address
+        sm_config_set_out_pins(&c, startReadPin, endReadPin); //read pins
+        pio_sm_set_in_pins(pio, sm, startReadPin); //read pins
+        sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_RX);
+
+        //DMA configurations:
+        //endReadPin
+        //sm+pio_get_index(pio)
+
+        pio_sm_init(pio,sm,offset,&c);
+
+        pio_sm_set_enabled(pio,sm,true);
+    }
+
+
+    static inline void read_key_col(PIO pio, uint sm, uint offset, uint startReadPin, uint endReadPin, uint writePin){
+        for (int i=startReadPin; i<startReadPin+endReadPin; i++){
+            pio_gpio_init(pio, i);
+            gpio_pull_up(i);//this should be fine for output just another Vcc on the line
+            //disable schmitt trigger to catch lower order pulses as signal
+            //this is moreover a trigger threshold hack
+            gpio_set_input_hysteresis_enabled(i,0);
+            gpio_set_slew_rate(i, 1); //set 1 clock slew NOTE: this and schmitt disable may cause instability
+            //NOTE: may need to change drive strength since brown out can occur when writting all columns high
+        }
+        pio_sm_config c = read_key_col_get_default_config(offset);
+        sm_config_set_in_shift(&c, true, false, 2*read_key_col_COLS);
+        sm_config_set_set_pins(&c, writePin+1, 1); //first address
+        sm_config_set_side_pins(&c, writePin, 1); //second address
+        sm_config_set_out_pins(&c, startReadPin, endReadPin); //read pins
+        pio_sm_set_in_pins(pio, sm, startReadPin); //read pins
+        sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_RX);
+
+        pio_sm_init(pio,sm,offset,&c);
+
+        pio_sm_set_enabled(pio,sm,true);
+    }
+
+
+    static inline void read_key_col_repeat(PIO pio, uint sm, uint offset, uint startReadPin, uint endReadPin, uint writePin){
+        for (int i=startReadPin; i<startReadPin+endReadPin; i++){
+            pio_gpio_init(pio, i);
+            gpio_pull_up(i);//this should be fine for output just another Vcc on the line
+            //disable schmitt trigger to catch lower order pulses as signal
+            //this is moreover a trigger threshold hack
+            gpio_set_input_hysteresis_enabled(i,0);
+            //set 1 clock slew NOTE: this and schmitt disable may cause instability and induction/false positives and negative
+            //(line induction? lines are not even and likely geometric)
+            gpio_set_slew_rate(i, 1);
+
+            //NOTE: may need to change drive strength since brown out can occur when writting all columns high
+            //      || rapid slew may need overvoltage for Tau
+            //all of this should be resolvable in this configuration
+        }
+        pio_sm_config c = read_key_col_repeat_get_default_config(offset);
+        sm_config_set_in_shift(&c, true, false, 2*read_key_col_repeat_COLS);
+        sm_config_set_set_pins(&c, writePin+1, 1); //first address
+        sm_config_set_side_pins(&c, writePin, 1); //second address
+        sm_config_set_out_pins(&c, startReadPin, endReadPin); //read pins
+        pio_sm_set_in_pins(pio, sm, startReadPin); //read pins
+        sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_RX);
+
+        pio_sm_init(pio,sm,offset,&c);
+
+        pio_sm_set_enabled(pio,sm,true);
+    }
+%}
+
+
+
+; @DEPRECATED: JUMP OR
+; TODO this is awesome but there arent enough instructions. need to rework sometime but for now doing something simpler
+; TODO .offset may be the fix for this using two bit jump iterations with .word bitstrings
+;.program update_values
+;update_values:
+;    ;NOTE we just || here and do &&ing in dedicated core each SM gets its own DMA channel thats
+;    ;     always || and zeroed (reset) in readChord
+;    ; we have like 50 clocks until we read again so loop on 10 bits
+;    ; OR previous y with current x value
+;    ; iterate from LSB to MSB building the mask adding bits that arent in y from x to y
+;    ; we have 24 instructions left
+;
+;    ;pull in the previous readings from DMA (two bytes in LSB)
+;    pull ;upper half word is zeros
+;
+;    ;add number of iterations to MSB
+;    mov x osr
+;    mov osr isr
+;    mov isr ::x
+;    in NULL 16 ;null out the upper bits
+;    set x COLS
+;
+;    ; osr has prev readings and isr has current key readings
+;    ; readings are less than 16 so we can use the backside
+;    ; of the word for iteration and result bits with ::
+;    ; NOTE: can only iterate up to 15
+;    ; MSB(osr) = result ;once iteration is complete this should rot over to LSB (lower byte, upper is zero)
+;    ; MSB(isr) = iteration ;this is just an uint
+;
+;    ;load COLS bits into OSR for iteration
+;    ;zero COLS bits into ISR for result
+;
+;jump_or:
+;    in x, 16 ;stash half word iteration value
+;    ;grab a bit from osr (current)
+;    out x 1
+;    mov y ::isr ;also correct position from iteration loading
+;    mov isr osr
+;    mov isr y
+;    ;grab a bit from isr (prev)
+;    out y 1
+;
+;; TODO this goes after true and false
+;; TODO extract to a jmp if necessary for instr count otherwise inline
+;    ;get iteration variable out of ISR (currently OSR)
+;    mov osr ::osr ;flip
+;
+; TODO: can evaluate 2x2 with mov pc x and .origin 17
+;    jmp x!=y false ; 1 bit ||
+;
+;
+;true:
+;    ;shift a 1 into ::result
+;    ;TODO have to then :: and shift back..
+;    ; TODO this can go at top of loop since if x is 0 nothing to or against anyways
+;    out x 16 ;iteration variable
+;    in x 1
+;    jmp x-- done ;return when we've iterated all bits
+;    jmp jump_or
+;false:
+;    ;shift a 0 into ::result
+;    in null 1
+;    ;reset isr to osr
+;    ;TODO may shift wrap to here since read is wait and jump to configure
+;    ;::iterate
+;    out x 16 ;iteration variable
+;    jmp x-- done
+;    jmp jump_or
+;;TODO careful of worst case: all are true so we lose COLS clocks. this should
+;;be unconditional unless only instr. bound. this makes delay synchronization non deterministic
+;
+;done:
+;    ;TODO move upper two bytes of osr into lower two bytes
+;    push ;push result into DMA
+;    .wrap
+;
