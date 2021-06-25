@@ -1,0 +1,30 @@
+;perform the ReadKeys routine from Steno.ino
+
+; NOTE: only have 32 instructions for all SMs in a PIO
+
+; define pins here so we can double up our FIFOs as out only to DMA
+.define rowStart 10
+.define rowEnd 13
+
+.define colStart 0
+.define colEnd 9
+
+.program ReadKeys
+; TODO DMA handles 1 32 bit word at a time when using both FIFOs. 
+;		need two clocks per row/column reading since 34 keys
+; use the two 32 bit registers x and y
+.warp_target
+	;write row and col pins high
+	out row, 1
+	out col, 1
+
+	;read col pin
+	in pins, col
+
+	;read row pin
+	in pins, row
+
+	;iterate col
+	;iterate row
+
+.warp

@@ -1,0 +1,9 @@
+# These can be overridden in platform.local.txt
+compiler.c.extra_flags= -O3
+compiler.c.elf.extra_flags= -O3
+compiler.S.extra_flags=
+compiler.cpp.extra_flags= -O3
+compiler.ar.extra_flags=
+compiler.objcopy.eep.extra_flags=
+compiler.elf2hex.extra_flags=
+
